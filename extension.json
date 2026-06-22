@@ -1,0 +1,14 @@
+{
+    "builtin": "False",
+    "default_enabled": "True",
+    "type": "extension",
+    "rocket_mode_compatible": "False",
+    "name": "Baron-plagins",
+    "description": "Plagins for Revit",
+    "author": "Abankin Dmitry",
+    "author_profile": "https://github.com/Ab-dima",
+    "url": "https://github.com/Ab-dima/Baron_plagin.git",
+    "website": "https://www.youtube.com/",
+    "image": "",
+    "dependencies": []
+}

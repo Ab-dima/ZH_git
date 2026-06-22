@@ -1,0 +1,12 @@
+{"XMax" : "0.2",
+  "YMax" : "0.2",
+  "ZMax" : "0.2",
+  "XMin" : "0.2",
+  "YMin" : "0.2",
+  "ZMin" : "0.2",
+  "HoleType": "Отверстие_ВК",
+  "OnPlaneSquare" : true,
+  "OnLevelSquare" : true,
+  "OnPlaneCircle" : true,
+  "OnLevelCircle" : true
+}

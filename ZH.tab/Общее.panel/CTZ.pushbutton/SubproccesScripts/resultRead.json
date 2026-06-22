@@ -1,0 +1,5 @@
+{"NameCheck": {"Status": true, "Checks": {"Checks1": {"check1": {"Parameter": "comment", "Operator": "=", "Value": "123"},
+                                                      "check2": {"Parameter": "comment", "Operator": "=", "Value": "85"}},
+                                          "Checks2": {"AND": null,
+                                          "Checks3": {"check1": {"Parameter": "comment", "Operator": "=", "Value": "52"},
+                                                      "check2": {"Parameter": "comment", "Operator": "=", "Value": "32"}}}}}}
