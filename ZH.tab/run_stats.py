@@ -1,6 +1,6 @@
 #-*- coding: utf-8 -*-
 
-a = 123
+
 import getpass
 import json
 from datetime import datetime
