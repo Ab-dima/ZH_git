@@ -26,6 +26,7 @@ from System.Windows.Forms import *
 import os
 import getpass
 from System.Collections.Generic import List
+from datetime import date
 
 userName = getpass.getuser()
 dirnameFile = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +56,110 @@ try:
 except Exception as e:
     pass
 
+class UpdateResultComment(IExternalEventHandler):
+    def __init__(self):
+        self.doc = doc
+        self.slabs       = None
+        self.UserCanChangeStatus = False
+        self.today = date.today().strftime('%d.%m.%Y')
+
+    def Execute(self, commandData):
+        from Autodesk.Revit.DB import ElementId, ViewType, Transaction, XYZ, BoundingBoxXYZ, Transform
+        from System.Collections.Generic import List
+
+        try:
+            t = Transaction(self.doc, "Результат опирания")
+            t.Start()
+
+            if isinstance(self.slabs, list):
+                for slab_scriptPath in self.slabs:
+                    slab, scriptPath = slab_scriptPath
+                    paramSlab = slab.LookupParameter("ZH_Опирание плиты_Результат")
+                    if paramSlab:
+                        if   scriptPath == "RESOLVED":
+                            paramSlab = paramSlab.Set("Успешно: опирание присутствует ({})".format(self.today))
+                        elif scriptPath == "REVIUWED":
+                            paramSlab = paramSlab.Set("Проанализировано: будет исправлено позже ({})".format(self.today))
+                        elif scriptPath == "ERRORPLATE":
+                            if self.UserCanChangeStatus == False:
+                                if paramSlab.HasValue and "Проанализировано" in paramSlab.AsValueString(): continue
+                            paramSlab = paramSlab.Set("Ошибка: нет опирания ({})".format(self.today))
+
+            t.Commit()
+        except Exception as e:
+            print("UpdateResultComment >>> Error: {}".format(e))
+
+
+    def GetName(self):
+        return 'Copy'
+
+
+handlerUpdateResultComment = UpdateResultComment()
+external_eventUpdateResultComment = ExternalEvent.Create(handlerUpdateResultComment)
+
+def check_and_create_parameter_FOP_in_project():
+    main_path_FOP = r'P:\10_Документы\Bim\Библиотека ресурсов\Revit\ФОП\ФОП для теста\ФОП 2021.txt'
+    temp_path_FOP = r'P:\10_Документы\Bim\Библиотека ресурсов\Revit\ФОП\ФОП для теста\TEMP_ФОП.txt'
+    if not all(os.path.exists(i) for i in [main_path_FOP, temp_path_FOP]):
+        return False
+
+    t = Transaction(doc, "Создание параметра")
+    t.Start()
+
+    try:
+        ### --------- ПЕРЕКЛЮЧАЕМ НА ВСПОМОГАТЕЛЬНЫЙ ФОП --------------------------
+        app.SharedParametersFilename = temp_path_FOP
+        sp_file = app.OpenSharedParameterFile()
+        ### ------------------------------------------------------------------------
+
+        ###----------- СОЗДАНИЕ ПАРАМЕТРОВ В ФОП -----------------------------------
+        group_name = "Изменения"
+        group = None
+
+        for g in sp_file.Groups:
+            if g.Name == group_name:
+                group = g
+                break
+
+
+        if not group:
+            group = sp_file.Groups.Create(group_name)
+
+        paramName = "ZH_Опирание плиты_Результат"
+        definitions = []
+        existing = None
+
+        for d in group.Definitions:
+            if d.Name == "ZH_Опирание плиты_Результат":
+                existing = d
+                break
+
+        if existing:
+            definitions.append(existing)
+        else:
+            opt = ExternalDefinitionCreationOptions(paramName, SpecTypeId.String.Text)
+            definition = group.Definitions.Create(opt)
+            definitions.append(definition)
+        ### -----------------------------------------------------------------------
+
+        ###----------- ДОБАВЛЕНИЕ СОЗДАННОГО ПАРАМЕТРА ----------------------------
+        cat = Category.GetCategory(doc, BuiltInCategory.OST_StructuralFraming)
+        cat_set = app.Create.NewCategorySet()
+        cat_set.Insert(cat)
+        binding = app.Create.NewInstanceBinding(cat_set)
+        for d in definitions:
+            doc.ParameterBindings.Insert(d, binding, BuiltInParameterGroup.PG_TEXT)
+        ### -----------------------------------------------------------------------
+
+        ### --------- ПЕРЕКЛЮЧАЕМ НА ОСНОВНОЙ ФОП ---------------------------------
+        app.SharedParametersFilename = main_path_FOP
+        ### -----------------------------------------------------------------------
+        t.Commit()
+        return True
+    except Exception as e:
+        print("error: {}".format(e))
+        t.Commit()
+        return False
 
 def solid_to_model_lines(doc, solid, sketch_plane=None):
     """
@@ -457,10 +562,6 @@ def get_bad_slup():
                 "60": support_60_ids,
                 "all": support_all_ids}
 
-
-
-
-
     def strip_has_wall_support(strip_solid, analized_slab_id, support_elems):
         # solid_to_model_lines(doc, strip_solid)
 
@@ -507,7 +608,8 @@ def get_bad_slup():
     global totalCounterSlab
     totalCounterSlab = 0
 
-    bad_slabs = []
+    bad_slabs    = []
+    succes_slabs = []
 
     support_elems = build_support_cache(doc, doc.ActiveView.Id)
 
@@ -533,7 +635,17 @@ def get_bad_slup():
 
         if supported_ends < 4:
             bad_slabs.append(slab.Id)
-
+        else:
+            succes_slabs.append(slab.Id)
+    
+    data_to_change_comment = []
+    for lstSlabIds, scriptPath in zip([bad_slabs, succes_slabs],["ERRORPLATE", "RESOLVED"]):
+        lstSlabElements = [doc.GetElement(i) for i in lstSlabIds]
+        for i in [doc.GetElement(i) for i in lstSlabIds]:
+            data_to_change_comment.append([i, scriptPath])
+        
+    handlerUpdateResultComment.slabs       = data_to_change_comment
+    external_eventUpdateResultComment.Raise()
 
     bad_slabs = List[ElementId](bad_slabs)
 
@@ -728,6 +840,8 @@ class MainForm(Form):
         self.handlerOverrideElems = OverrideView(self)
         self.external_eventhandlerOverrideElems = ExternalEvent.Create(self.handlerOverrideElems)
 
+        self.handlerUpdateResultComment = handlerUpdateResultComment
+        self.external_eventUpdateResultComment = external_eventUpdateResultComment
 
         self.fColor = Color.White
         self.sColor = Color.Gray
@@ -869,8 +983,10 @@ class MainForm(Form):
 
 
         self.analizedElems = TreeView(Location = Point(10,45),
-                                      Size = Size(mainPanel.Width - 185, mainPanel.Height - 50))
+                                      Size = Size(mainPanel.Width - 185, mainPanel.Height - 50),
+                                      CheckBoxes = True)
         mainPanel.Controls.Add(self.analizedElems)
+        self.analizedElems.AfterCheck += self.update_comment_in_slab
         self.analizedElems.AfterSelect += self.treeViewAfterSelect
         self.analizedElems.AfterSelect += self.selectElement
         self.analizedElems.DoubleClick += self.showElement
@@ -925,13 +1041,17 @@ class MainForm(Form):
 
         for elId in elems:
             elem = self.doc.GetElement(elId)
+            boolCheckedData = False
+            paramSlab = elem.LookupParameter("ZH_Опирание плиты_Результат")
+            if paramSlab and paramSlab.HasValue: boolCheckedData = "Проанализировано" in paramSlab.AsValueString()
+
             elIdStr = elId.ToString()
 
             if elem.Category.BuiltInCategory == BuiltInCategory.OST_GenericAnnotation:
                 viewName = self.doc.GetElement(self.doc.GetElement(elId).OwnerViewId).Name
                 dictView_elems.setdefault('Схема', {}).setdefault(viewName,[]).append(elIdStr)
             else:
-                dictView_elems.setdefault('Модель',{}).setdefault('<Без вида>',[]).append(elIdStr)
+                dictView_elems.setdefault('Модель',{}).setdefault('<Без вида>',[]).append("{}__{}".format(elIdStr, str(boolCheckedData)))
 
         if not dictView_elems:
             node = self.analizedElems.Nodes.Add('<<<Ничего не выбрано>>>')
@@ -948,10 +1068,42 @@ class MainForm(Form):
                 viewNode = TreeNode(view)
                 catNode.Nodes.Add(viewNode)
 
-                for elId in elemIds:
-                    viewNode.Nodes.Add(elId)
+                for id_bool_data in elemIds:
+                    elId, boolStr = id_bool_data.split("__")
+                    endNode = TreeNode(elId)
+                    endNode.Checked = True if boolStr == "True" else False
+                    viewNode.Nodes.Add(endNode)
             else:
                 self.analizedElems.Nodes.Add(catNode)
+
+    def update_comment_in_slab(self, sender, event):
+        from Autodesk.Revit.DB import ElementId
+        eventNode = event.Node
+        if eventNode.Nodes: return
+
+        slab_in_model = self.doc.GetElement(ElementId(int(eventNode.Text)))
+        if slab_in_model:
+            self.handlerUpdateResultComment.UserCanChangeStatus = True
+            if eventNode.Checked:
+                self.handlerUpdateResultComment.slabs = [[slab_in_model, "REVIUWED"]]
+            else:
+                self.handlerUpdateResultComment.slabs = [[slab_in_model, "ERRORPLATE"]]
+            self.external_eventUpdateResultComment.Raise()
+
+
+
+
+        # def recource_node(node):
+        #     if node.Checked: list_checked_node.append(node)
+        #     if node.Nodes:
+        #         for node in node.Nodes:
+        #             recource_node(node)
+        #
+        # for node in self.analizedElems.Nodes:
+        #     recource_node(node)
+        #
+        # for node in list_checked_node:
+        #     if node.Nodes: continue
 
 
 
@@ -1142,6 +1294,7 @@ class MainForm(Form):
         self.Close()
 
 def main():
+    check_and_create_parameter_FOP_in_project()
     get_bad_slup()
     form = MainForm()
     form.Show()
