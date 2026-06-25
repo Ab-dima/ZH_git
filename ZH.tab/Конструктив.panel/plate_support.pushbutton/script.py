@@ -1294,7 +1294,6 @@ class MainForm(Form):
         self.Close()
 
 def main():
-    
     check_and_create_parameter_FOP_in_project()
     get_bad_slup()
     form = MainForm()
