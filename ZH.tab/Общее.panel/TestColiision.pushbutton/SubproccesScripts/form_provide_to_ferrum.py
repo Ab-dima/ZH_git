@@ -250,6 +250,7 @@ class MainForm(Form):
     def to_right(self, sender, event):
         if self.selectedIndexImage + 1 > len(self.data_dict):
             self.selectedIndexImage = 1
+        elif self.selectedIndexImage + 1 == len(self.data_dict):
             self.close_form.Visible = True
         else:
             self.selectedIndexImage += 1
