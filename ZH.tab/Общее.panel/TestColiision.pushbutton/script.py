@@ -77,6 +77,11 @@ from System.Windows.Forms import *
 from System.Drawing import Size, Point, Pen, Font, Color, ContentAlignment, Image, SolidBrush, FontStyle, StringFormat, StringAlignment
 from System.Diagnostics import Process
 
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from run_stats import track_run
+    track_run(__title__, os.path.dirname(os.path.abspath(__file__)))
+except:pass
 
 class ColorStyle():
     def __init__(self, name, fColor, sColor):
@@ -2067,12 +2072,16 @@ class CollisionForm(Form):
             self.backStatus = True
         self.Close()
 
+
+path_provide_form = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SubproccesScripts")
+sys.path.insert(0, path_provide_form)
+import form_provide_to_ferrum
+
 def main():
+    form_provide_to_ferrum.start()
     form = CollisionForm()
     form.Show()
-    # while form.Enabled:
-    #     Application.DoEvents()
-    # Application.Run(form)
+
 try:
     if __name__ == '__main__':
         main()
