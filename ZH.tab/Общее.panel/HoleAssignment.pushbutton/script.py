@@ -467,6 +467,17 @@ class SettingForm(Form):
         # self.panelTop.Controls.SetChildIndex(sepRight, 0)
         """--------------------------------------------------------------"""
 
+    def showLineError(self, error):
+        import traceback
+        import sys
+        print('-------------- ERROR ---------------------')
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        tb = traceback.extract_tb(exc_tb)
+        filename, line, func, text = tb[-1]
+        print(line)
+        print("Ошибка: {}".format(error))
+        print('-------------- ERROR ---------------------')
+
     def setTemplateJson(self):
         try:
             self.jsonSettings = self.openTemplateSettings()
@@ -1134,7 +1145,7 @@ class SelectElemsHandler(IExternalEventHandler):
         try:
             # Получаем документ Revit
             if self.elem_1 is None:
-                print("One or both elements are None")
+                # print("One or both elements are None")
                 return None
             else:
                 element_ids = []
@@ -2174,6 +2185,7 @@ class CollisionForm(Form):
 
     def find_element_in_files(self, element_id):
         from Autodesk.Revit.DB import ElementId, FilteredElementCollector, BuiltInCategory, FamilyInstance
+
         element_id = ElementId(element_id)
         try:
 
@@ -2314,7 +2326,9 @@ class CollisionForm(Form):
             else:
                 ids = elementsInProject[ids]
 
-        self.handlerSelectionElems.elem_1 = self.find_element_in_files(int(ids))[0]
+        result = self.find_element_in_files(int(ids))
+        if result:
+            self.handlerSelectionElems.elem_1 = result[0]
         try:
             self.external_eventSelectionElems.Raise()
         except Exception as e:
@@ -2607,7 +2621,7 @@ class CollisionForm(Form):
                         text1 = 'Элемент 1:\nБез описания'
                 self.labelInfoElem1.Text = text1
         except Exception as e:
-            print(e)
+            self.showLineError(e)
             return None
 
     #
