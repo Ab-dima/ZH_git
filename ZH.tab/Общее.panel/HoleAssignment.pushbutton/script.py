@@ -134,9 +134,9 @@ dirnameFileImages = os.path.join(dirnameFile, r'Images')
 
 
 try:
-    with open(dirnameFile + r'\SubData\setEngineers.json', 'r') as file:
-        dataSetEngineers = json.load(file)
-    if userName in dataSetEngineers['KR']:
+    # with open(dirnameFile + r'\SubData\setEngineers.json', 'r') as file:
+    #     dataSetEngineers = json.load(file)
+    if "КР" in app.Username:
         validateEngineer = 'KR'
     else:
         validateEngineer = 'OTHER'
