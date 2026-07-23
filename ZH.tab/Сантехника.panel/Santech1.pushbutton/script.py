@@ -122,20 +122,6 @@ class IgnoreWarningsProcessor(IFailuresPreprocessor):
         return FailureProcessingResult.Continue
 
 
-
-# class CustomISelectionFilter(ISelectionFilter):
-#     from Autodesk.Revit.DB import BuiltInCategory
-#     def AllowElement(self, e):
-#         categoryes = ["Сантехнические приборы"]
-#         # Проверяем элементы в связанном документе на совпадение категории
-#         if e.Category.Name in categoryes:
-#             return True
-#         return False
-#
-#     def AllowReference(self, ref, point):
-#         return False
-
-
 class CopyElementsHandler(IExternalEventHandler):
     def __init__(self, parent):
         self.ignore = IgnoreWarningsProcessor()
@@ -370,8 +356,8 @@ class CopySantehForm(Form):
         self.FormBorderStyle = FormBorderStyle.None
         self.Font = Font('ISOCPEUR', 12)
 
-        self.builtinCategoryes = [BuiltInCategory.OST_PlumbingFixtures, BuiltInCategory.OST_GenericModel,
-                                  BuiltInCategory.OST_DuctTerminal]
+        self.builtinCategoryes = [BuiltInCategory.OST_PlumbingFixtures, BuiltInCategory.OST_DuctTerminal]
+        # --- Удалили обобщенные модели OST_GenericModel (почему добавляли - хз)
 
         self.controlPanel()
         self.middlePanel()
@@ -708,6 +694,7 @@ class CopySantehForm(Form):
             return None
         return informationParam
 
+
     def get_elements_with_comment(self, substring="ZHCOPY"):
         from Autodesk.Revit.DB import FilteredElementCollector, BuiltInParameter, ParameterValueProvider, \
             FilterStringContains, FilterStringRule, ElementParameterFilter, FamilyInstance, ElementId
@@ -729,9 +716,57 @@ class CopySantehForm(Form):
         return elements
 
     def selectElementsInLinkedDocument(self, sender, event):
+        from Autodesk.Revit.UI.Selection import ISelectionFilter
+        from Autodesk.Revit.DB import ElementId, RevitLinkInstance, BuiltInCategory
+        doc = self.doc
+        builtinCategoryes = self.builtinCategoryes
+
+        class CustomISelectionFilter(ISelectionFilter):
+            def AllowElement(self, e):
+                return True
+            def AllowReference(self, reference, position):
+                try:
+                    link_instance = doc.GetElement(reference)
+                    if not isinstance(link_instance, RevitLinkInstance):
+                        return False
+                except Exception as e:
+                    print(e)
+                    return False
+
+                link_doc = link_instance.GetLinkDocument()
+                if link_doc is None:
+                    return False
+
+                linked_element = link_doc.GetElement(reference.LinkedElementId)
+                if linked_element is None:
+                    return False
+
+                # ваша реальная логика фильтрации
+                category = linked_element.Category.BuiltInCategory
+
+                boolResult = category in builtinCategoryes
+                if boolResult:
+                    if category == BuiltInCategory.OST_DuctTerminal:
+
+                        codeParam = linked_element.LookupParameter("ZH_Код_Тип_Число")
+                        if codeParam is None:
+                            codeParam = linked_element.Symbol.LookupParameter("ZH_Код_Тип_Число")
+                        if codeParam is None:
+                            return False
+
+                        codeParam_value = codeParam.AsDouble()
+
+                        if codeParam_value in [640.1, 640.2, 640.3]:
+                            return True
+                    else:
+                        return True
+
+                return False
+
+
         from Autodesk.Revit.UI import Selection
         try:
-            self.handlerCopyElements.elements = self.uidoc.Selection.PickObjects(Selection.ObjectType.LinkedElement)
+            self.handlerCopyElements.elements = self.uidoc.Selection.PickObjects(Selection.ObjectType.LinkedElement, CustomISelectionFilter())
             self.handlerCopyElements.parent = self
             try:
                 self.external_eventCopyElements.Raise()
