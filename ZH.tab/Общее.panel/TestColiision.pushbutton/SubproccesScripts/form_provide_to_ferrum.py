@@ -252,6 +252,7 @@ class MainForm(Form):
             self.selectedIndexImage = 1
         elif self.selectedIndexImage + 1 == len(self.data_dict):
             self.close_form.Visible = True
+            self.selectedIndexImage += 1
         else:
             self.selectedIndexImage += 1
 
