@@ -722,7 +722,7 @@ class CopyElementsHandler(IExternalEventHandler):
                         targetSymbol = get_type_by_name(familyHole, typeHole)
                         if targetSymbol is None:
                             MessageBox.Show("В проекте отутствует типоразмер {}\n"
-                                            "в семействе {}".format(familyHole, typeHole))
+                                            "в семействе {}".format(typeHole, familyHole))
                             continue
                         targetSymbol.Activate()
 
