@@ -134,9 +134,9 @@ dirnameFileImages = os.path.join(dirnameFile, r'Images')
 
 
 try:
-    # with open(dirnameFile + r'\SubData\setEngineers.json', 'r') as file:
-    #     dataSetEngineers = json.load(file)
-    if "КР" in app.Username:
+    with open(dirnameFile + r'\SubData\setEngineers.json', 'r') as file:
+        dataSetEngineers = json.load(file)
+    if userName in dataSetEngineers['KR']:
         validateEngineer = 'KR'
     else:
         validateEngineer = 'OTHER'
@@ -467,17 +467,6 @@ class SettingForm(Form):
         # self.panelTop.Controls.SetChildIndex(sepRight, 0)
         """--------------------------------------------------------------"""
 
-    def showLineError(self, error):
-        import traceback
-        import sys
-        print('-------------- ERROR ---------------------')
-        exc_type, exc_value, exc_tb = sys.exc_info()
-        tb = traceback.extract_tb(exc_tb)
-        filename, line, func, text = tb[-1]
-        print(line)
-        print("Ошибка: {}".format(error))
-        print('-------------- ERROR ---------------------')
-
     def setTemplateJson(self):
         try:
             self.jsonSettings = self.openTemplateSettings()
@@ -630,6 +619,7 @@ class CopyElementsHandler(IExternalEventHandler):
             StorageType
         from Autodesk.Revit.DB.Structure import StructuralType
         import math
+        from System.Windows.Forms import MessageBox
 
         class CopyUseDestination(IDuplicateTypeNamesHandler):
             def OnDuplicateTypeNamesFound(self, args):
@@ -723,14 +713,16 @@ class CopyElementsHandler(IExternalEventHandler):
                         continue
 
                     categoryReferece = linkedElement.Category
+
                     if categoryReferece and categoryReferece.BuiltInCategory == BuiltInCategory.OST_GenericModel:
                         dataParentParameters = get_all_instance_parameters(linkedElement)
-
                         familyHole = linkedElement.get_Parameter(BuiltInParameter.ELEM_FAMILY_PARAM).AsValueString()
                         typeHole   = linkedElement.get_Parameter(BuiltInParameter.ELEM_TYPE_PARAM).AsValueString()
 
                         targetSymbol = get_type_by_name(familyHole, typeHole)
                         if targetSymbol is None:
+                            MessageBox.Show("В проекте отутствует типоразмер {}\n"
+                                            "в семействе {}".format(familyHole, typeHole))
                             continue
                         targetSymbol.Activate()
 
@@ -1145,7 +1137,7 @@ class SelectElemsHandler(IExternalEventHandler):
         try:
             # Получаем документ Revit
             if self.elem_1 is None:
-                # print("One or both elements are None")
+                print("One or both elements are None")
                 return None
             else:
                 element_ids = []
@@ -1364,6 +1356,8 @@ class CollisionForm(Form):
 
         self.filterConflicts = '<All>'
         self.view2DOr3D = '2D'
+        self.IsEOM = False
+
 
         self.selectedRowsIndicate = []
         self.rowsCheck = []
@@ -1609,6 +1603,28 @@ class CollisionForm(Form):
                                       Size = Size(300,35),
                                      TextAlign = ContentAlignment.MiddleLeft)
         panelMainTop.Controls.Add(self.labelBoxXMLfile)
+
+        # --- ComboBox - для раздела ЭОМ, чтобы выделять отверстия в разные файлы отчетов
+        self.cmb_EOM_Section = ComboBox(Location = Point(self.Width - 200, 7),
+                                        Size = Size(90, 30),
+                                        DropDownStyle=ComboBoxStyle.DropDownList,
+                                        Visible = False)
+
+        label = Label(Text = "Секция:",
+                      Location = Point(self.Width - 260, 10),
+                      Size = Size(60, 30),
+                      Visible = False)
+        panelMainTop.Controls.Add(label)
+
+        if "ЭОМ" in self.doc.Title:
+            self.IsEOM = True
+            for i in ["<Нет>"]+['С{}'.format(s) for s in range(1,11)] + ['П{}'.format(k) for k in range(1,4)]:
+                self.cmb_EOM_Section.Items.Add(i)
+            self.cmb_EOM_Section.SelectedIndex  = 0
+            self.cmb_EOM_Section.Visible = True
+            label.Visible = True
+            panelMainTop.Controls.Add(self.cmb_EOM_Section)
+
 
         self.checkBoxChar2D = RadioButton(Name='2D',
                                              Text='2D',
@@ -2185,7 +2201,6 @@ class CollisionForm(Form):
 
     def find_element_in_files(self, element_id):
         from Autodesk.Revit.DB import ElementId, FilteredElementCollector, BuiltInCategory, FamilyInstance
-
         element_id = ElementId(element_id)
         try:
 
@@ -2326,9 +2341,7 @@ class CollisionForm(Form):
             else:
                 ids = elementsInProject[ids]
 
-        result = self.find_element_in_files(int(ids))
-        if result:
-            self.handlerSelectionElems.elem_1 = result[0]
+        self.handlerSelectionElems.elem_1 = self.find_element_in_files(int(ids))[0]
         try:
             self.external_eventSelectionElems.Raise()
         except Exception as e:
@@ -2621,7 +2634,7 @@ class CollisionForm(Form):
                         text1 = 'Элемент 1:\nБез описания'
                 self.labelInfoElem1.Text = text1
         except Exception as e:
-            self.showLineError(e)
+            print(e)
             return None
 
     #
@@ -2720,6 +2733,12 @@ class CollisionForm(Form):
             holes = get_type_by_name_first_element(self.jsonSettings['HoleType'], BuiltInCategory.OST_GenericModel)
             data_holeDict = OrderedDict()
             for hole in holes:
+
+                if self.IsEOM:
+                    section_selection = self.cmb_EOM_Section.SelectedItem
+                    hole_comment = hole.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsString()
+                    if hole_comment != section_selection:
+                        continue
 
                 if self.getZHCodeTypeDigitValue(hole) in [99.03, 99.04]:
                     diameter = hole.LookupParameter("ADSK_Размер_Диаметр")
