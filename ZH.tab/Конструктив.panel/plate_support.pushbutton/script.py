@@ -13,6 +13,7 @@ import codecs
 from collections import OrderedDict
 
 import clr
+
 clr.AddReference("System")
 clr.AddReference("System.Drawing")
 clr.AddReference("System.Windows.Forms")
@@ -61,34 +62,55 @@ class UpdateResultComment(IExternalEventHandler):
         self.doc = doc
         self.slabs       = None
         self.UserCanChangeStatus = False
-        self.today = date.today().strftime('%d.%m.%Y')
+        # self.today = date.today().strftime('%d.%m.%Y')
 
     def Execute(self, commandData):
         from Autodesk.Revit.DB import ElementId, ViewType, Transaction, XYZ, BoundingBoxXYZ, Transform
         from System.Collections.Generic import List
 
         try:
-            t = Transaction(self.doc, "Результат опирания")
-            t.Start()
+            param = self.doc.ProjectInformation.LookupParameter("ZH_Опирание плит_Результат")
+            if not param:
+                return
+
+            dct = {"REVIEWED": set(), "ERRORPLATE": set()}
+            for chunk in (param.AsValueString() or "").split("||"):
+                key, _, values = chunk.partition("|:")
+                if key in dct:
+                    dct[key] = set(filter(None, values.split(",")))
 
             if isinstance(self.slabs, list):
-                for slab_scriptPath in self.slabs:
-                    slab, scriptPath = slab_scriptPath
-                    paramSlab = slab.LookupParameter("ZH_Опирание плиты_Результат")
-                    if paramSlab:
-                        if   scriptPath == "RESOLVED":
-                            paramSlab = paramSlab.Set("Успешно: опирание присутствует ({})".format(self.today))
-                        elif scriptPath == "REVIUWED":
-                            paramSlab = paramSlab.Set("Проанализировано: будет исправлено позже ({})".format(self.today))
-                        elif scriptPath == "ERRORPLATE":
-                            if self.UserCanChangeStatus == False:
-                                if paramSlab.HasValue and "Проанализировано" in paramSlab.AsValueString(): continue
-                            paramSlab = paramSlab.Set("Ошибка: нет опирания ({})".format(self.today))
+                reviewed0 = set(dct["REVIEWED"])
+                passed = set()
 
-            t.Commit()
+                for slab, scriptPath in self.slabs:
+                    sid = slab.Id.ToString()
+                    passed.add(sid)
+
+                    if scriptPath == "REVIEWED":
+                        dct["ERRORPLATE"].discard(sid)
+                        dct["REVIEWED"].add(sid)
+                    elif scriptPath == "ERRORPLATE" and (sid not in reviewed0 or self.UserCanChangeStatus == True):
+                        dct["REVIEWED"].discard(sid)
+                        dct["ERRORPLATE"].add(sid)
+
+                if self.UserCanChangeStatus == False:
+                    for key in dct.keys():
+                        dct[key] &= passed
+
+            text = "||".join("{}|:{}".format(k, ",".join(sorted(v))) for k, v in dct.items() if v)
+
+            t = Transaction(self.doc, "Результат опирания")
+            t.Start()
+            try:
+                param.Set(text)
+                t.Commit()
+            except Exception as e:
+                t.RollBack()
+                raise
+
         except Exception as e:
             print("UpdateResultComment >>> Error: {}".format(e))
-
 
     def GetName(self):
         return 'Copy'
@@ -101,7 +123,7 @@ def check_and_create_parameter_FOP_in_project():
     main_path_FOP = r'P:\10_Документы\Bim\Библиотека ресурсов\Revit\ФОП\ФОП для теста\ФОП 2021.txt'
     temp_path_FOP = r'P:\10_Документы\Bim\Библиотека ресурсов\Revit\ФОП\ФОП для теста\TEMP_ФОП.txt'
     if not all(os.path.exists(i) for i in [main_path_FOP, temp_path_FOP]):
-        return False
+        return None
 
     t = Transaction(doc, "Создание параметра")
     t.Start()
@@ -125,12 +147,12 @@ def check_and_create_parameter_FOP_in_project():
         if not group:
             group = sp_file.Groups.Create(group_name)
 
-        paramName = "ZH_Опирание плиты_Результат"
+        paramName = "ZH_Опирание плит_Результат"
         definitions = []
         existing = None
 
         for d in group.Definitions:
-            if d.Name == "ZH_Опирание плиты_Результат":
+            if d.Name == "ZH_Опирание плит_Результат":
                 existing = d
                 break
 
@@ -143,7 +165,7 @@ def check_and_create_parameter_FOP_in_project():
         ### -----------------------------------------------------------------------
 
         ###----------- ДОБАВЛЕНИЕ СОЗДАННОГО ПАРАМЕТРА ----------------------------
-        cat = Category.GetCategory(doc, BuiltInCategory.OST_StructuralFraming)
+        cat = Category.GetCategory(doc, BuiltInCategory.OST_ProjectInformation)
         cat_set = app.Create.NewCategorySet()
         cat_set.Insert(cat)
         binding = app.Create.NewInstanceBinding(cat_set)
@@ -225,17 +247,7 @@ def get_bad_slup():
 
     EPS = 1e-6
 
-    # CТЕНЫ
-    fel_walls = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(BuiltInCategory.OST_Walls).WhereElementIsNotElementType()
-
-    # CТЕНЫ
-    fel_kn = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(BuiltInCategory.OST_StructuralFraming).WhereElementIsNotElementType()
-
     analized_slab = None
-
-
-
-
 
     def get_code_value(elem):
         try:
@@ -521,7 +533,7 @@ def get_bad_slup():
         except AttributeError:
             return int(element_id.IntegerValue)
 
-    def build_support_cache(doc, view_id):
+    def build_support_cache(doc, view_id = None):
         support_100_ids = List[ElementId]()
         support_60_ids = List[ElementId]()
         support_all_ids =  List[ElementId]()
@@ -532,9 +544,11 @@ def get_bad_slup():
 
         category_filter = ElementMulticategoryFilter(categories)
 
-        collector = (FilteredElementCollector(doc, view_id)
-                     .WhereElementIsNotElementType()
-                     .WherePasses(category_filter))
+        if view_id is not None:
+            collector = (FilteredElementCollector(doc).WhereElementIsNotElementType().WherePasses(category_filter))
+        else:
+            collector = (
+                FilteredElementCollector(doc).WhereElementIsNotElementType().WherePasses(category_filter))
 
         wall_category_id = get_element_id_value(ElementId(BuiltInCategory.OST_Walls))
         framing_category_id = get_element_id_value(ElementId(BuiltInCategory.OST_StructuralFraming))
@@ -597,13 +611,8 @@ def get_bad_slup():
         except Exception as e:
             return False
 
-    slabs = (
-        FilteredElementCollector(doc, doc.ActiveView.Id)
-        .OfCategory(BuiltInCategory.OST_StructuralFraming)
-        .WhereElementIsNotElementType()
-        .ToElements()
-
-    )
+    # slabs = FilteredElementCollector(doc, doc.ActiveView.Id).OfCategory(BuiltInCategory.OST_StructuralFraming).WhereElementIsNotElementType().ToElements()
+    slabs = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_StructuralFraming).WhereElementIsNotElementType().ToElements()
 
     global totalCounterSlab
     totalCounterSlab = 0
@@ -611,7 +620,8 @@ def get_bad_slup():
     bad_slabs    = []
     succes_slabs = []
 
-    support_elems = build_support_cache(doc, doc.ActiveView.Id)
+    # support_elems = build_support_cache(doc, doc.ActiveView.Id)
+    support_elems = build_support_cache(doc=doc, view_id=None)
 
     for slab in slabs:
         if not code_in_range(slab, SLAB_CODE_MIN, SLAB_CODE_MAX) or code_equiles(slab, 311.9):
@@ -644,7 +654,7 @@ def get_bad_slup():
         for i in [doc.GetElement(i) for i in lstSlabIds]:
             data_to_change_comment.append([i, scriptPath])
         
-    handlerUpdateResultComment.slabs       = data_to_change_comment
+    handlerUpdateResultComment.slabs = data_to_change_comment
     external_eventUpdateResultComment.Raise()
 
     bad_slabs = List[ElementId](bad_slabs)
@@ -671,9 +681,7 @@ class OverrideView(IExternalEventHandler):
         try:
             if self.doc.ActiveView.ViewType == ViewType.ThreeD and self.selNode:
 
-                collector = FilteredElementCollector(self.doc, self.doc.ActiveView.Id) \
-                    .WhereElementIsNotElementType() \
-                    .ToElementIds()
+                collector = FilteredElementCollector(self.doc).WhereElementIsNotElementType().ToElementIds()
 
                 try:
 
@@ -1037,44 +1045,34 @@ class MainForm(Form):
         from System.Windows.Forms import TreeNode
         from System.Drawing import Color
         from Autodesk.Revit.DB import BuiltInCategory
-        dictView_elems = {}
+        dictView_elems = []
 
         for elId in elems:
             elem = self.doc.GetElement(elId)
             boolCheckedData = False
-            paramSlab = elem.LookupParameter("ZH_Опирание плиты_Результат")
-            if paramSlab and paramSlab.HasValue: boolCheckedData = "Проанализировано" in paramSlab.AsValueString()
-
-            elIdStr = elId.ToString()
-
-            if elem.Category.BuiltInCategory == BuiltInCategory.OST_GenericAnnotation:
-                viewName = self.doc.GetElement(self.doc.GetElement(elId).OwnerViewId).Name
-                dictView_elems.setdefault('Схема', {}).setdefault(viewName,[]).append(elIdStr)
-            else:
-                dictView_elems.setdefault('Модель',{}).setdefault('<Без вида>',[]).append("{}__{}".format(elIdStr, str(boolCheckedData)))
+            dictView_elems.append(elId.ToString())
 
         if not dictView_elems:
             node = self.analizedElems.Nodes.Add('<<<Ничего не выбрано>>>')
+            self.analizedElems.CheckBoxes = False
             for n in self.analizedElems.Nodes:
                 n.ForeColor = Color.Red
             return
 
-        for catElem, views in dictView_elems.items():
-            catNode = TreeNode(catElem)
 
-            for view, elemIds in views.items():
-                if not elemIds:
-                    break
-                viewNode = TreeNode(view)
-                catNode.Nodes.Add(viewNode)
+        dctReviewed = {"REVIEWED" : set()}
+        paramDocInformation = self.doc.ProjectInformation.LookupParameter("ZH_Опирание плит_Результат")
+        if paramDocInformation:
+            for chunk in (paramDocInformation.AsValueString() or "").split("||"):
+                key, _, values = chunk.partition("|:")
+                if key in dctReviewed:
+                    dctReviewed[key] = set(filter(None, values.split(",")))
 
-                for id_bool_data in elemIds:
-                    elId, boolStr = id_bool_data.split("__")
-                    endNode = TreeNode(elId)
-                    endNode.Checked = True if boolStr == "True" else False
-                    viewNode.Nodes.Add(endNode)
-            else:
-                self.analizedElems.Nodes.Add(catNode)
+        for elem in dictView_elems:
+            node = TreeNode(elem)
+            if elem in dctReviewed["REVIEWED"]:
+                node.Checked = True
+            self.analizedElems.Nodes.Add(node)
 
     def update_comment_in_slab(self, sender, event):
         from Autodesk.Revit.DB import ElementId
@@ -1085,7 +1083,7 @@ class MainForm(Form):
         if slab_in_model:
             self.handlerUpdateResultComment.UserCanChangeStatus = True
             if eventNode.Checked:
-                self.handlerUpdateResultComment.slabs = [[slab_in_model, "REVIUWED"]]
+                self.handlerUpdateResultComment.slabs = [[slab_in_model, "REVIEWED"]]
             else:
                 self.handlerUpdateResultComment.slabs = [[slab_in_model, "ERRORPLATE"]]
             self.external_eventUpdateResultComment.Raise()
