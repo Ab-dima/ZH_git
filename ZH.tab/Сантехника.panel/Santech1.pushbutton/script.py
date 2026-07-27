@@ -183,7 +183,7 @@ class CopyElementsHandler(IExternalEventHandler):
                 new_instances = ElementTransformUtils.CopyElements(link_doc, List[ElementId](copyes_to_elements.keys()),
                                                               self.doc, transform, options)
                 for instance, strId in zip(new_instances, copyes_to_elements.values()):
-                    self.doc.GetElement(instance).get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set('{}_{}'.format('ZHCOPY', strId[0]))
+                    self.doc.GetElement(instance).get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).Set('{}_{}'.format('ZHCOPY-FROMLINKDOC', strId[0]))
                     # try:
                     #     self.doc.GetElement(instance).get_Parameter(BuiltInParameter.INSTANCE_ELEVATION_PARAM).Set(strId[1])
                     # except Exception as e:
@@ -698,7 +698,7 @@ class CopySantehForm(Form):
         return informationParam
 
 
-    def get_elements_with_comment(self, substring="ZHCOPY"):
+    def get_elements_with_comment(self, substring="ZHCOPY-FROMLINKDOC"):
         from Autodesk.Revit.DB import FilteredElementCollector, BuiltInParameter, ParameterValueProvider, \
             FilterStringContains, FilterStringRule, ElementParameterFilter, FamilyInstance, ElementId
         # Получаем параметр "Комментарии" для фильтрации
