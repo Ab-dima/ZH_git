@@ -568,8 +568,45 @@ class CheckRevision(IExternalEventHandler):
             return returnValue
         ###DEFS ⬆️⬆️⬆️
 
+        def get_temp_schedule(subTextAlbom, numRev):
+            viewSchedule = self.parent.get_view_by_name_to_element('ZH_Ведомость изменений{}'.format(subTextAlbom))
+            if viewSchedule is None:
+                viewSchedule = createKeySchedule(subTextAlbom)
+
+            if viewSchedule is None:
+                return None
+
+            table_data = viewSchedule.GetTableData()
+            sectionData = table_data.GetSectionData(SectionType.Body)
+
+            return viewSchedule, viewSchedule.GetTableData().GetSectionData(SectionType.Body)
+
+        def delete_data_row_in_schedule(viewSchedule):
+            """В данной частки кода удаляем все позиции ключевой спецификации"""
+            elements_to_remove = FilteredElementCollector(self.doc, viewSchedule.Id).WhereElementIsNotElementType().ToElements()
+            if len(elements_to_remove) > 0:
+                for i in reversed(range(len(elements_to_remove))):
+                    sectionData.RemoveRow(i)
+
+        def set_data_in_shedule(row ,
+                                subTextAlbom,
+                                numRev,
+                                numSheet,
+                                discription,
+                                reason):
+            try:
+                row.LookupParameter('Изм._Изм.{}'.format(subTextAlbom)).Set(numRev)
+                row.LookupParameter('Изм._Лист{}'.format(subTextAlbom)).Set(numSheet)
+                row.LookupParameter('Изм._Содержание изменений{}'.format(subTextAlbom)).Set(discription)
+                row.LookupParameter('Изм._Код{}'.format(subTextAlbom)).Set(reason)
+            except Exception as e:
+                self.parent.showLineError(e)
+
+
 
         try:
+            _unionSheets = self.parent.chbUnionSheets.Checked
+
             sheets = []
             tempDocs = [self.doc]
             tempDocs.extend(self.linkDocs)
@@ -803,13 +840,14 @@ class CheckRevision(IExternalEventHandler):
                                     param_ADSK_primechanie.Set('{}.{}'.format(numberRev, value))
                     ### --------------------------------------------⬆️⬆️⬆️---------------------------------------------------
 
-                    if numberRev not in resultToShedule:
-                        resultToShedule[numberRev] = {numberSheet: [[descriptionRev, reasonCodeRev]]}
+                    if not _unionSheets:
+                        (resultToShedule.setdefault(numberRev, {}).
+                         setdefault(numberSheet, []).
+                         append([descriptionRev, reasonCodeRev]))
                     else:
-                        if numberSheet not in resultToShedule[numberRev]:
-                            resultToShedule[numberRev][numberSheet] = [[descriptionRev, reasonCodeRev]]
-                        else:
-                            resultToShedule[numberRev][numberSheet].append([descriptionRev, reasonCodeRev])
+                        (resultToShedule.setdefault(numberRev, {}).
+                         setdefault((descriptionRev, reasonCodeRev), []).
+                         append(numberSheet))
 
                 def getOnlyNum(string):
                     itogNumberString = ''
@@ -835,83 +873,76 @@ class CheckRevision(IExternalEventHandler):
                     except:
                         return 0
 
-                sortedRevSheetDiscript = OrderedDict(sorted(resultToShedule.items(), key=lambda x: int(x[0])))
-                for rev_key in sortedRevSheetDiscript:
-                    sortedRevSheetDiscript[rev_key] = OrderedDict(sorted(resultToShedule[rev_key].items(), key=lambda x: getOnlyNum(x[0])))
-                    for sheet_key in sortedRevSheetDiscript[rev_key]:
-                        sortedRevSheetDiscript[rev_key][sheet_key] = sorted(resultToShedule[rev_key][sheet_key],
-                                                                            key=lambda x: x)
-
-
                 subText = '_{}'.format(self.albomName)
+                flag_viewSchedule = None
 
-                temp_viewSchedule = None
+                sortedRevSheetDiscript = OrderedDict(sorted(resultToShedule.items(), key=lambda x: int(x[0])))
+
+                flagNumRev = ''
+                flagNumSheet = ''
 
                 try:
-                    flagNumRev = ''
-                    flagNumSheet = ''
                     for enum, numRev in enumerate(sortedRevSheetDiscript.keys(), 0):
+
                         subTextAlbom = subText
                         if self.parent.chbShareSchedule.Checked:
                             subTextAlbom = subText + '_изм.{}'.format(numRev)
+                        viewSchedule, sectionData = get_temp_schedule(subTextAlbom, numRev)
 
-                        viewSchedule = self.parent.get_view_by_name_to_element('ZH_Ведомость изменений{}'.format(subTextAlbom))
-                        if viewSchedule is None:
-                            viewSchedule = createKeySchedule(subTextAlbom)
-
-                        if viewSchedule is None: continue ### ПРОПУСКАЕМ В СЛУЧАЕ, ЕСЛИ ДАЖЕ ПРИ СОЗДАНИИ viewSchedule is None
+                        if flag_viewSchedule != viewSchedule.Id.ToString():
+                            delete_data_row_in_schedule(viewSchedule)
+                            flag_viewSchedule = viewSchedule.Id.ToString()
 
 
-                        table_data = viewSchedule.GetTableData()
-                        sectionData = table_data.GetSectionData(SectionType.Body)
+                        result_lst = []
+                        if not _unionSheets:
+                            sortedRevSheetDiscript[numRev] =  OrderedDict(sorted(resultToShedule[numRev].items(), key=lambda x: getOnlyNum(x[0])))
+                            for sheet_key in sortedRevSheetDiscript[numRev]:
+                                sortedRevSheetDiscript[numRev][sheet_key] = sorted(resultToShedule[numRev][sheet_key], key=lambda x: x)
 
-                        if temp_viewSchedule and viewSchedule.Id == temp_viewSchedule.Id:
-                            pass
+                            for numSheet in sortedRevSheetDiscript[numRev].keys():
+                                for discription, reason in sortedRevSheetDiscript[numRev][numSheet]:
+                                    result_lst.append([numSheet, discription, reason])
                         else:
-                            temp_viewSchedule = viewSchedule
-                            """В данной частки кода удаляем все позиции ключевой спецификации"""
-                            elements_to_remove = FilteredElementCollector(self.doc, viewSchedule.Id).WhereElementIsNotElementType().ToElements()
-                            if len(elements_to_remove) > 0:
-                                for i in reversed(range(len(elements_to_remove))):
-                                    sectionData.RemoveRow(i)
+                            sortedRevSheetDiscript[numRev] = OrderedDict(sorted(resultToShedule[numRev].items(), key=lambda x: sorted(getOnlyNum(i) for i in x[1])[0]))
+                            for data, lst_num_sheets in sortedRevSheetDiscript[numRev].items():
+                                result_lst.append([", ".join(set(sorted(lst_num_sheets))), data[0], data[1]])
 
+                        for numSheet, discription, reason in result_lst:
+                            if discription is None or len(discription) == 0:
+                                discription = '<Без описания>'
+                            elif discription == '-':
+                                continue
 
-                        for numSheet in sortedRevSheetDiscript[numRev].keys():
-                            for discription, reason in sortedRevSheetDiscript[numRev][numSheet]:
-                                if discription is None or len(discription) == 0:
-                                    discription = '<Без описания>'
-                                elif discription == '-':
-                                    continue
+                            if reason is None:
+                                reason = ''
 
-                                if reason is None:
-                                    reason = ''
+                            if flagNumRev != numRev:
+                                flagNumRev = numRev
+                                setNumRev = numRev
+                                flagNumSheet = ''
+                            else:
+                                setNumRev = ''
 
-                                if flagNumRev != numRev:
-                                    flagNumRev = numRev
-                                    setNumRev = numRev
-                                    flagNumSheet = ''
-                                else:
-                                    setNumRev = ''
+                            if flagNumSheet != numSheet:
+                                flagNumSheet = numSheet
+                                setNumSheet = numSheet
+                            else:
+                                setNumSheet = ''
 
-                                if flagNumSheet != numSheet:
-                                    flagNumSheet = numSheet
-                                    setNumSheet = numSheet
-                                else:
-                                    setNumSheet = ''
+                            sectionData.InsertRow(0)
+                            elements_to_add = list(FilteredElementCollector(self.doc, viewSchedule.Id).WhereElementIsNotElementType().ToElements())[-1]
 
-                                sectionData.InsertRow(0)
-                                elements_to_add = list(FilteredElementCollector(self.doc, viewSchedule.Id).WhereElementIsNotElementType().ToElements())[-1]
-
-                                try:
-                                    elements_to_add.LookupParameter('Изм._Изм.{}'.format(subTextAlbom)).Set(setNumRev)
-                                    elements_to_add.LookupParameter('Изм._Лист{}'.format(subTextAlbom)).Set(setNumSheet)
-                                    elements_to_add.LookupParameter('Изм._Содержание изменений{}'.format(subTextAlbom)).Set(discription)
-                                    elements_to_add.LookupParameter('Изм._Код{}'.format(subTextAlbom)).Set(reason)
-                                except Exception as e:
-                                    self.parent.showLineError(e)
+                            set_data_in_shedule(elements_to_add,
+                                                subTextAlbom,
+                                                setNumRev,
+                                                setNumSheet,
+                                                discription,
+                                                reason)
                 except Exception as e:
-                    t.Commit()
                     self.parent.showLineError(e)
+                    t.RollBack()
+
                 t.Commit()
 
             except Exception as e:
@@ -1699,7 +1730,7 @@ class RevisionForm(Form):
 
         self.ControlBox = False
         self.BackColor = self.fColor
-        self.Size = Size(250, 290)
+        self.Size = Size(250, 340)
         self.TopMost = True
         self.StartPosition = FormStartPosition.CenterScreen
         self.ShowIcon = False
@@ -1932,6 +1963,13 @@ class RevisionForm(Form):
                                            Location=Point(self.Width / 2 - 100, 115),
                                            TextAlign=ContentAlignment.MiddleCenter)
         mainPanel.Controls.Add(self.chbShareSchedule)
+
+        self.chbUnionSheets = CheckBox(Text='Объединить листы с\n'
+                                              'одним описанием?',
+                                         Size=Size(200, 35),
+                                         Location=Point(self.Width / 2 - 100, 155),
+                                         TextAlign=ContentAlignment.MiddleCenter)
+        mainPanel.Controls.Add(self.chbUnionSheets)
 
 
 
